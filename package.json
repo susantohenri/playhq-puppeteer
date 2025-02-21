@@ -19,7 +19,8 @@
   "homepage": "https://github.com/susantohenri/playhq-puppeteer#readme",
   "description": "",
   "dependencies": {
-    "puppeteer": "^24.2.1"
+    "puppeteer": "^24.2.1",
+    "xlsx-populate": "^1.21.0"
   },
   "type": "module"
 }

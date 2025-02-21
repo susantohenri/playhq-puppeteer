@@ -1,13 +1,14 @@
 import puppeteer from 'puppeteer';
+import xlsxPopulate from 'xlsx-populate'
 
 (async () => {
     let players = await getPlayesUrl();
-    // players = [players[8], players[12]];
+    players = [players[10], players[11]]
     players = await Promise.all(players.map(async (player) => {
         const data = await pullData(`https://www.playhq.com${player.url}`);
         return { ...data, ...player }
     }));
-    console.log({ players });
+    writeXlsx(players);
 })();
 
 async function getPlayesUrl() {
@@ -109,4 +110,26 @@ async function pullData(url) {
     await browser.close();
 
     return result;
+}
+
+async function writeXlsx(players) {
+    try {
+        const workbook = await xlsxPopulate.fromFileAsync(`template.xlsx`);
+        const sheet = workbook.sheet(`Template`);
+
+        let row = 2;
+        players.forEach(player => {
+            sheet.cell(`A${row}`).value(player[`#`]);
+            sheet.cell(`B${row}`).value(player['name']);
+            sheet.cell(`M${row}`).value(player['1 Point']);
+            sheet.cell(`N${row}`).value(player['2 Points']);
+            sheet.cell(`O${row}`).value(player['3 Points']);
+            sheet.cell(`Q${row}`).value(player['Total Fouls']);
+            row++;
+        })
+
+        await workbook.toFileAsync(`result.xlsx`);
+    } catch (error) {
+        console.error('Error updating Excel file:', error);
+    }
 }
