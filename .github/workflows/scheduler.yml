@@ -13,6 +13,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Configure AppArmor
+        run: |
+          sudo aa-complain /etc/apparmor.d/chrome
+          echo 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/00-local.conf
+          sudo sysctl -p /etc/sysctl.d/00-local.conf
+          
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxss1 \
+            libasound2 \
+            libatk-bridge2.0-0 \
+            libgtk-3-0 \
+            libgbm1 \
+            libnss3 \
+            libx11-xcb-dev \
+            libxcb-dri3-dev \
+            libdrm-dev \
+            libxshmfence-dev
+
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
