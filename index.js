@@ -1,9 +1,13 @@
 import puppeteer from 'puppeteer';
 
 (async () => {
-    const urls = await getPlayesUrl();
-    const data = await Promise.all(urls.map(url => pullData(url)));
-    console.log({ data });
+    let players = await getPlayesUrl();
+    // players = [players[8], players[12]];
+    players = await Promise.all(players.map(async (player) => {
+        const data = await pullData(`https://www.playhq.com${player.url}`);
+        return { ...data, ...player }
+    }));
+    console.log({ players });
 })();
 
 async function getPlayesUrl() {
@@ -41,11 +45,18 @@ async function getPlayesUrl() {
         timeout: 10000
     });
 
-    const selector = `a[href^="/public/profile/"]`
-    await page.waitForSelector(selector, { timeout: 10000 });
-    const hrefs = await page.evaluate(selector => {
-        return [...document.querySelectorAll(selector)].map(player => `https://www.playhq.com` + player.getAttribute(`href`));
-    }, selector);
+    const hrefs = await page.evaluate(() => {
+        const data = [];
+        document.querySelectorAll(`tr[data-testid]`).forEach(row => {
+            const cells = row.cells
+            data.push({
+                "#": cells[0].querySelector(`div`).textContent.trim(),
+                "name": cells[1].querySelector(`div a span`).textContent.trim(),
+                "url": cells[1].querySelector(`div a`).getAttribute(`href`),
+            })
+        })
+        return data;
+    });
 
     await browser.close();
 
@@ -55,6 +66,7 @@ async function getPlayesUrl() {
 async function pullData(url) {
     const browser = await puppeteer.launch({
         headless: true,
+        devtools: false,
     });
     const page = await browser.newPage();
     await page.setUserAgent(`Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36`);
@@ -78,22 +90,21 @@ async function pullData(url) {
         timeout: 10000
     });
 
-    await page.waitForFunction(() => {
-        const targets = [`1 Point`, `2 Points`, `3 Points`, `Total Fouls`];
+    const items = [`1 Point`, `2 Points`, `3 Points`, `Total Fouls`];
+    await page.waitForFunction((items) => {
         return [...document.querySelectorAll('span')].some(span =>
-            targets.some(target => span.textContent.includes(target))
+            items.some(item => span.textContent.includes(item))
         );
-    });
-    const result = await page.evaluate(() => {
-        const data = {
-            name: document.querySelector(`h1`).textContent.trim(),
-        };
-        [`1 Point`, `2 Points`, `3 Points`, `Total Fouls`].forEach(title => {
-            const span = Array.from(document.querySelectorAll(`span`)).find(el => el.textContent.trim() === title);
-            data[title] = span.previousElementSibling.textContent.trim()
+    }, {}, items);
+
+    const result = await page.evaluate((items) => {
+        const data = {};
+        items.forEach(item => {
+            const span = Array.from(document.querySelectorAll(`span`)).find(el => el.textContent.trim() === item);
+            data[item] = span.previousElementSibling.textContent.trim()
         })
         return data;
-    });
+    }, items);
 
     await browser.close();
 
