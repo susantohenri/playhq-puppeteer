@@ -13,28 +13,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Configure SUID sandbox
-        run: |
-          cd ~/.cache/puppeteer/chrome/linux-<version>/chrome-linux64/
-          sudo chown root:root chrome_sandbox
-          sudo chmod 4755 chrome_sandbox
-          export CHROME_DEVEL_SANDBOX=/usr/local/sbin/chrome-devel-sandbox
-          
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libxss1 \
-            libasound2 \
-            libatk-bridge2.0-0 \
-            libgtk-3-0 \
-            libgbm1 \
-            libnss3 \
-            libx11-xcb-dev \
-            libxcb-dri3-dev \
-            libdrm-dev \
-            libxshmfence-dev
-
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
