@@ -13,11 +13,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Configure AppArmor
+      - name: Configure SUID sandbox
         run: |
-          sudo aa-complain /etc/apparmor.d/chrome
-          echo 'kernel.unprivileged_userns_clone=1' | sudo tee /etc/sysctl.d/00-local.conf
-          sudo sysctl -p /etc/sysctl.d/00-local.conf
+          cd ~/.cache/puppeteer/chrome/linux-<version>/chrome-linux64/
+          sudo chown root:root chrome_sandbox
+          sudo chmod 4755 chrome_sandbox
+          export CHROME_DEVEL_SANDBOX=/usr/local/sbin/chrome-devel-sandbox
           
       - name: Install dependencies
         run: |
