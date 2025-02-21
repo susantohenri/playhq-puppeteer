@@ -70,8 +70,8 @@ async function getPlayesUrl() {
 
 async function pullData(url) {
     const browser = await puppeteer.launch({
-        headless: false,
-        devtools: true,
+        headless: true,
+        devtools: false,
         args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
     const page = await browser.newPage();
