@@ -1,0 +1,27 @@
+name: Run Puppeteer Script Every 2 Hours
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'  # This cron expression schedules the workflow to run every 2 hours.
+  workflow_dispatch:  # Allows manual triggering of the workflow from the GitHub UI.
+
+jobs:
+  run-puppeteer-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'  # You can change this to your desired Node.js version.
+
+      - name: Install dependencies
+        run: |
+          npm install
+
+      - name: Run Puppeteer Script
+        run: |
+          node index.js
