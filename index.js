@@ -160,10 +160,45 @@ async function uploadFile() {
             mute: false
         };
 
-        const dbx = new Dropbox({ accessToken: `sl.u.AFhVsfx5KoGqCV1KN4suuJ-o-_d6SHmEDpH0uoQ1UeMLx0YEay3TrgWWebGPuyfF7JEYyh5GoQ1Xaqu5-nWxpOsORB91bzyvhAY0_Hu1Wn2KltAEYWsPsv3tWNUy-cqrmiFDDLFmuE5UMWrxDD6IFmsRCOm0K7Do1cMyGaTtRKhZsvjrgm5s_Mtu9zLxG8-BcVTEbjBQQY1ztkaJNZEnLKOJH2WSvV0oQXga564JhuSK_vF4RfGr4v5fdaFSKn8Ml2UFTbH8CfSFZ3GW0y6GS1MzsbPf6BtLbMYBGvDdunrHpvUQCYUrtDl3tUz5eizdzjTMMGfdNcvs3PYO6kcm-9JIBghXWabllp-ejQWppmFBon1Aen3AsKg8BsUSnf2iOc2Vz0LY88rHc__HkCm0JytB2E8Ej3EZVu08OEM5MNgS_b_MkltQalo31-v6mlmb396qD3MIh3bwBQUhDyhooBbEfjY5AiaVOpteQWlQIp_UZdG20FcEvEpH50QVltCyjBzvSyG12pkwuA1Z8rvgqfVkLPXswc6iOu5fFDjzQTWgaz23ed_YNcelS9bfVu576_P_rZsQAvwnpEcXb1xXcTg1BX2DVnW2waOyBGSfKMXP6C9q6mkH5wTUBNsop4Igu0dV0nUEfpZDsQmH7CRkZ33WMwT7NMTVhSCoGHNRotXIaSEivc8GV93OMNw5qhO7SerMEDo0SpugxrvJ3v4q3tywN_RiVgeelndsfAyBNMGSYQgmbutvOsd9jqGzMd-p3wkyWrHTePvmkCXxuIrXMaVSWfUsLrPgdrjLs8ZTIljPc0Tr-92-s6k49BtC-sxpCIkE3LsIbbhccreNVNqTfoG2COu9UEJdENElS62VicHxDzdO8VrHRWMVbL-JN1ReDHLfJwrga4-d4h8G2uSMzkxbbgVih0_bci4j5OI96sExDKDsVLz_w9tq3SEY4YrduKgJfoCBJHiyLJAe2Zx62BkNLrkLssmQEvYyA3t9rR9dkB3X2tyGz9Xuyt0mV0WIW_yrJXPCGIqLnexADW7FwK_EOk_RW_wV8-mikiVym85EJFquGteZiWQ3j--U_7hcCYaHBKDxpOu7LYzy1yLXYEJkkd6No3gwCnMzQEw8rIxR5j3yBoLORS-OY1uBUZD9UGjF3b62K8EeZQcHIyPswVuXGOYVzB3x2TQgsAeI0keMH2xbcFtwngEYXXoO6gWqZ3gRL7BpLRjm573RQ_kG-CGsqyEYrb1wr7CLVnX36eFXOGwWVC4qktaXoP6NcG13f9dRv-tal9MeE482pe4wHM4W` });
+        const dbx = new Dropbox({ accessToken: await dropboxAccessToken() });
         return await dbx.filesUpload(uploadParams);
     } catch (error) {
         console.error('Error uploading file:', error.message);
         throw error;
+    }
+}
+
+async function dropboxAccessToken() {
+    /*
+        1. open this link to get AUTHORIZATION_CODE:
+            https://www.dropbox.com/oauth2/authorize?client_id=vr33naiand0vmk8&token_access_type=offline&response_type=code
+        2. run following curl to get refresh token
+            curl -X POST https://api.dropbox.com/oauth2/token \
+                -d grant_type=authorization_code \
+                -d code=AUTHORIZATION_CODE \
+                -u vr33naiand0vmk8:3q8eer02z75j3xp
+    */
+    try {
+        const auth = btoa(`vr33naiand0vmk8:3q8eer02z75j3xp`);
+        const response = await fetch('https://api.dropbox.com/oauth2/token', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Authorization': `Basic ${auth}`
+            },
+            body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                refresh_token: 'r1Em3ZtZ_IgAAAAAAAAAASMncdY-uco3OJ0Dzsz8lAQbUSOPEDgIZkuLXZKM_Sz0'
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.access_token;
+    } catch (error) {
+        console.error('Error refreshing token:', error.response.data);
     }
 }
