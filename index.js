@@ -4,14 +4,36 @@ import { Dropbox } from 'dropbox';
 import * as fs from 'fs';
 
 (async () => {
-    let players = await getPlayesUrl();
+    const [names, data] = await Promise.all([
+        readPlayerNames(),
+        getPlayesUrl()
+    ]);
+    let players = names.map(name => {
+        return { ...data.find(obj => obj.name === name), name };
+    });
+
     players = await Promise.all(players.map(async (player) => {
+        if (!player.url) return { ...player };
         const data = await pullData(`https://www.playhq.com${player.url}`);
         return { ...data, ...player }
     }));
     await writeXlsx(players);
     await uploadFile();
 })();
+
+async function readPlayerNames() {
+    const workbook = await xlsxPopulate.fromFileAsync(`./template.xlsx`);
+    const sheet = workbook.sheet(`Template`);
+    let row = 2;
+    const names = [];
+    while (true) {
+        const name = sheet.cell(`B${row}`).value();
+        row++;
+        if (undefined === name) break;
+        else names.push(name.replace(String.fromCharCode(160), String.fromCharCode(32)))
+    }
+    return names;
+}
 
 async function getPlayesUrl() {
     const browser = await puppeteer.launch({
