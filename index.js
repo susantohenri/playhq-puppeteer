@@ -6,17 +6,11 @@ import * as fs from 'fs';
 (async () => {
     const [names, data] = await Promise.all([
         readPlayerNames(),
-        getPlayesUrl()
+        pullPlayerData()
     ]);
     let players = names.map(name => {
         return { ...data.find(obj => obj.name === name), name };
     });
-
-    players = await Promise.all(players.map(async (player) => {
-        if (!player.url) return { ...player };
-        const data = await pullData(`https://www.playhq.com${player.url}`);
-        return { ...data, ...player }
-    }));
     await writeXlsx(players);
     await uploadFile();
 })();
@@ -35,9 +29,10 @@ async function readPlayerNames() {
     return names;
 }
 
-async function getPlayesUrl() {
+async function pullPlayerData() {
     const browser = await puppeteer.launch({
         headless: true,
+        devtools: false,
         args: [
             `--disable-gpu`,
             `--disable-dev-shm-usage`,
@@ -72,71 +67,33 @@ async function getPlayesUrl() {
         timeout: 10000
     });
 
-    const hrefs = await page.evaluate(() => {
+    await page.waitForFunction(() => {
+        const button = Array.from(document.querySelectorAll('button')).find(btn =>
+            btn.querySelector('span:last-child')?.textContent.trim() === "Show advanced stats"
+        )
+        return button && typeof button.onclick === 'function';
+    }, { timeout: 20000 });
+
+    const data = await page.evaluate(() => {
         const data = [];
+        Array.from(document.querySelectorAll('button')).find(btn =>
+            btn.querySelector('span:last-child')?.textContent.trim() === "Show advanced stats"
+        ).click()
         document.querySelectorAll(`tr[data-testid]`).forEach(row => {
             const cells = row.cells
             data.push({
                 "#": cells[0].querySelector(`div`).textContent.trim(),
                 "name": cells[1].querySelector(`div a span`).textContent.trim(),
-                "url": cells[1].querySelector(`div a`).getAttribute(`href`),
+                "1PT": cells[3].textContent.trim(),
+                "2PT": cells[4].textContent.trim(),
+                "3PT": cells[5].textContent.trim(),
+                "F": cells[6].textContent.trim(),
             })
-        })
+        });
         return data;
-    });
-
+    })
     await browser.close();
-
-    return hrefs;
-}
-
-async function pullData(url) {
-    const browser = await puppeteer.launch({
-        headless: true,
-        devtools: false,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    const page = await browser.newPage();
-    await page.setUserAgent(`Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36`);
-    await page.evaluateOnNewDocument(() => {
-        Object.defineProperty(navigator, `webdriver`, { get: () => undefined });
-    });
-    await page.setRequestInterception(true);
-    page.on('request', (request) => {
-        const resourceType = request.resourceType();
-        const url = request.url();
-        if (['image', 'stylesheet', 'font', 'svg'].includes(resourceType)) {
-            request.abort();
-        } else if (!url.includes('playhq.com')) {
-            request.abort();
-        } else {
-            request.continue();
-        }
-    });
-    await page.goto(url, {
-        waitUntil: `domcontentloaded`,
-        timeout: 10000
-    });
-
-    const items = [`1 Point`, `2 Points`, `3 Points`, `Total Fouls`];
-    await page.waitForFunction((items) => {
-        return [...document.querySelectorAll('span')].some(span =>
-            items.some(item => span.textContent.includes(item))
-        );
-    }, {}, items);
-
-    const result = await page.evaluate((items) => {
-        const data = {};
-        items.forEach(item => {
-            const span = Array.from(document.querySelectorAll(`span`)).find(el => el.textContent.trim() === item);
-            data[item] = span.previousElementSibling.textContent.trim()
-        })
-        return data;
-    }, items);
-
-    await browser.close();
-
-    return result;
+    return data;
 }
 
 async function writeXlsx(players) {
@@ -148,10 +105,10 @@ async function writeXlsx(players) {
         players.forEach(player => {
             sheet.cell(`A${row}`).value(player[`#`]);
             sheet.cell(`B${row}`).value(player['name']);
-            sheet.cell(`M${row}`).value(player['1 Point']);
-            sheet.cell(`N${row}`).value(player['2 Points']);
-            sheet.cell(`O${row}`).value(player['3 Points']);
-            sheet.cell(`Q${row}`).value(player['Total Fouls']);
+            sheet.cell(`M${row}`).value(player['1PT']);
+            sheet.cell(`N${row}`).value(player['2PT']);
+            sheet.cell(`O${row}`).value(player['3PT']);
+            sheet.cell(`Q${row}`).value(player['F']);
             row++;
         })
 
