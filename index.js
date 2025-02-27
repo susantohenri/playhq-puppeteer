@@ -4,9 +4,10 @@ import { Dropbox } from 'dropbox';
 import * as fs from 'fs';
 
 (async () => {
+    const url = await getUrl()
     const [names, data] = await Promise.all([
         readPlayerNames(),
-        pullPlayerData()
+        pullPlayerData(`https://www.playhq.com${url}`)
     ]);
     let players = names.map(name => {
         return { ...data.find(obj => obj.name === name), name };
@@ -15,21 +16,7 @@ import * as fs from 'fs';
     await uploadFile();
 })();
 
-async function readPlayerNames() {
-    const workbook = await xlsxPopulate.fromFileAsync(`./template.xlsx`);
-    const sheet = workbook.sheet(`Template`);
-    let row = 2;
-    const names = [];
-    while (true) {
-        const name = sheet.cell(`B${row}`).value();
-        row++;
-        if (undefined === name) break;
-        else names.push(name.replace(String.fromCharCode(160), String.fromCharCode(32)))
-    }
-    return names;
-}
-
-async function pullPlayerData() {
+async function getUrl() {
     const browser = await puppeteer.launch({
         headless: true,
         devtools: false,
@@ -62,7 +49,68 @@ async function pullPlayerData() {
             request.continue();
         }
     });
-    await page.goto(`https://www.playhq.com/basketball-victoria/org/victorian-junior-basketball-league-vjbl/victorian-junior-basketball-league-2025/u14-boys-grading-2-ll-pool-d/game-centre/66171e44`, {
+    await page.goto(`https://www.playhq.com/basketball-victoria/org/sandringham-sabres-basketball-club/f321d4fc/victorian-junior-basketball-league-2025/teams/sandringham-u14-boys-7/e9fc439b`, {
+        waitUntil: `domcontentloaded`,
+        timeout: 30000
+    });
+    await page.waitForFunction(() => {
+        return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0]
+    }, { timeout: 30000 });
+    const url = await page.evaluate(() => {
+        return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0].getAttribute(`href`)
+    })
+    browser.close()
+    return url;
+}
+
+async function readPlayerNames() {
+    const workbook = await xlsxPopulate.fromFileAsync(`./template.xlsx`);
+    const sheet = workbook.sheet(`Template`);
+    let row = 2;
+    const names = [];
+    while (true) {
+        const name = sheet.cell(`B${row}`).value();
+        row++;
+        if (undefined === name) break;
+        else names.push(name.replace(String.fromCharCode(160), String.fromCharCode(32)))
+    }
+    return names;
+}
+
+async function pullPlayerData(url) {
+    const browser = await puppeteer.launch({
+        headless: true,
+        devtools: false,
+        args: [
+            `--disable-gpu`,
+            `--disable-dev-shm-usage`,
+            `--disable-web-security`,
+            `--disable-features=AudioServiceOutOfProcess`,
+            `--disable-animations`,
+            `--disable-smooth-scrolling`,
+            `--disable-background-timer-throttling`,
+            '--no-sandbox',
+            '--disable-setuid-sandbox'
+        ],
+    });
+    const page = await browser.newPage();
+    await page.setUserAgent(`Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36`);
+    await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, `webdriver`, { get: () => undefined });
+    });
+    await page.setRequestInterception(true);
+    page.on('request', (request) => {
+        const resourceType = request.resourceType();
+        const url = request.url();
+        if (['image', 'stylesheet', 'font', 'svg'].includes(resourceType)) {
+            request.abort();
+        } else if (!url.includes('playhq.com')) {
+            request.abort();
+        } else {
+            request.continue();
+        }
+    });
+    await page.goto(url, {
         waitUntil: `domcontentloaded`,
         timeout: 10000
     });
@@ -72,7 +120,7 @@ async function pullPlayerData() {
             btn.querySelector('span:last-child')?.textContent.trim() === "Show advanced stats"
         )
         return button && typeof button.onclick === 'function';
-    }, { timeout: 20000 });
+    }, { timeout: 30000 });
 
     const data = await page.evaluate(() => {
         const data = [];
