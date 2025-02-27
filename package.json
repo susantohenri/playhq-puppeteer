@@ -21,7 +21,8 @@
   "description": "",
   "dependencies": {
     "dropbox": "^10.34.0",
-    "puppeteer": "^24.2.1",
+    "@sparticuz/chromium": "^132.0.0",
+    "puppeteer-core": "^24.0.0",
     "xlsx-populate": "^1.21.0"
   },
   "type": "module"
