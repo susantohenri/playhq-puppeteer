@@ -6,7 +6,7 @@ import { Dropbox } from 'dropbox';
 import * as fs from 'fs';
 
 export const handler = async (event) => {
-  const url = await getUrl()
+  const { url, nextSchedule } = await getUrlAndNextSchedule()
   const [names, data] = await Promise.all([
     readPlayerNames(),
     pullPlayerData(`https://www.playhq.com${url}`)
@@ -23,7 +23,7 @@ export const handler = async (event) => {
   return response;
 };
 
-async function getUrl() {
+async function getUrlAndNextSchedule() {
   const browser = await puppeteer.launch({
     defaultViewport: chromium.defaultViewport,
     executablePath: await chromium.executablePath(),
@@ -63,14 +63,61 @@ async function getUrl() {
     waitUntil: `domcontentloaded`,
     timeout: 30000
   });
+
+  // get url
   await page.waitForFunction(() => {
     return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0]
   }, { timeout: 30000 });
   const url = await page.evaluate(() => {
     return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0].getAttribute(`href`)
   })
+
+  // get next schedule
+  await page.waitForFunction(() => {
+    return document.querySelectorAll('[name="calendar-empty"]')[1]
+      .parentElement.nextElementSibling.querySelector('span')
+  }, { timeout: 30000 });
+  const nextSchedule = await page.evaluate(() => {
+    // Select the target element
+    const targetElement = document.querySelectorAll(`[name="calendar-empty"]`)[1];
+    if (!targetElement) return;
+
+    // Get parent and next sibling
+    const sibling = targetElement.parentElement?.nextElementSibling;
+    if (!sibling) return;
+
+    // Find the span inside the sibling
+    const span = sibling.querySelector("span");
+    if (!span) return;
+
+    // Extract text content (e.g., "06:40 PM, Fri, 28 Feb 25")
+    const text = span.textContent.trim();
+    const match = text.match(/(\d{2}):(\d{2})\s?(AM|PM),\s?(\w{3}),\s?(\d{2})\s?(\w{3})\s?(\d{2})/);
+    if (!match) return;
+
+    // Parse extracted values
+    let [_, hour, minute, period, dayOfWeek, day, monthStr, year] = match;
+    const monthMap = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+    const month = monthMap[monthStr];
+    year = `20${year}`; // Convert two-digit year to four-digit
+
+    // Convert to 24-hour format
+    hour = parseInt(hour, 10);
+    if (period === "PM" && hour !== 12) hour += 12;
+    if (period === "AM" && hour === 12) hour = 0;
+
+    // Create Date object in GMT+11
+    const date = new Date(Date.UTC(year, month, day, hour, minute));
+    date.setUTCHours(date.getUTCHours() - 11); // Convert to GMT+0
+
+    // Format to "yyyy-mm-dd hh:ii:ss"
+    const formattedDate = date.toISOString().replace("T", " ").split(".")[0];
+
+    return formattedDate;
+  })
+
   browser.close()
-  return url;
+  return { url, nextSchedule };
 }
 
 async function readPlayerNames() {
@@ -182,65 +229,65 @@ async function writeXlsx(players) {
 }
 
 async function uploadFile() {
-    try {
-        const contents = fs.readFileSync(`/tmp/result.xlsx`);
+  try {
+    const contents = fs.readFileSync(`/tmp/result.xlsx`);
 
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0'); // Month is 0-indexed
-        const day = String(now.getDate()).padStart(2, '0');
-        const hour = String(now.getHours()).padStart(2, '0');
-        const minute = String(now.getMinutes()).padStart(2, '0');
-        const second = String(now.getSeconds()).padStart(2, '0');
-        const path = `/playhq_${year}-${month}-${day}_${hour}-${minute}-${second}.xlsx`;
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0'); // Month is 0-indexed
+    const day = String(now.getDate()).padStart(2, '0');
+    const hour = String(now.getHours()).padStart(2, '0');
+    const minute = String(now.getMinutes()).padStart(2, '0');
+    const second = String(now.getSeconds()).padStart(2, '0');
+    const path = `/playhq_${year}-${month}-${day}_${hour}-${minute}-${second}.xlsx`;
 
-        const uploadParams = {
-            contents,
-            path,
-            mode: 'overwrite',
-            autorename: true,
-            mute: false
-        };
+    const uploadParams = {
+      contents,
+      path,
+      mode: 'overwrite',
+      autorename: true,
+      mute: false
+    };
 
-        const dbx = new Dropbox({ accessToken: await dropboxAccessToken() });
-        return await dbx.filesUpload(uploadParams);
-    } catch (error) {
-        console.error('Error uploading file:', error.message);
-        throw error;
-    }
+    const dbx = new Dropbox({ accessToken: await dropboxAccessToken() });
+    return await dbx.filesUpload(uploadParams);
+  } catch (error) {
+    console.error('Error uploading file:', error.message);
+    throw error;
+  }
 }
 
 async function dropboxAccessToken() {
-    /*
-        1. open this link to get AUTHORIZATION_CODE:
-            https://www.dropbox.com/oauth2/authorize?client_id=vr33naiand0vmk8&token_access_type=offline&response_type=code
-        2. run following curl to get refresh token
-            curl -X POST https://api.dropbox.com/oauth2/token \
-                -d grant_type=authorization_code \
-                -d code=AUTHORIZATION_CODE \
-                -u vr33naiand0vmk8:3q8eer02z75j3xp
-    */
-    try {
-        const auth = btoa(`vr33naiand0vmk8:3q8eer02z75j3xp`);
-        const response = await fetch('https://api.dropbox.com/oauth2/token', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Authorization': `Basic ${auth}`
-            },
-            body: new URLSearchParams({
-                grant_type: 'refresh_token',
-                refresh_token: 'r1Em3ZtZ_IgAAAAAAAAAASMncdY-uco3OJ0Dzsz8lAQbUSOPEDgIZkuLXZKM_Sz0'
-            })
-        });
+  /*
+      1. open this link to get AUTHORIZATION_CODE:
+          https://www.dropbox.com/oauth2/authorize?client_id=vr33naiand0vmk8&token_access_type=offline&response_type=code
+      2. run following curl to get refresh token
+          curl -X POST https://api.dropbox.com/oauth2/token \
+              -d grant_type=authorization_code \
+              -d code=AUTHORIZATION_CODE \
+              -u vr33naiand0vmk8:3q8eer02z75j3xp
+  */
+  try {
+    const auth = btoa(`vr33naiand0vmk8:3q8eer02z75j3xp`);
+    const response = await fetch('https://api.dropbox.com/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${auth}`
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: 'r1Em3ZtZ_IgAAAAAAAAAASMncdY-uco3OJ0Dzsz8lAQbUSOPEDgIZkuLXZKM_Sz0'
+      })
+    });
 
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        return data.access_token;
-    } catch (error) {
-        console.error('Error refreshing token:', error.response.data);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
+
+    const data = await response.json();
+    return data.access_token;
+  } catch (error) {
+    console.error('Error refreshing token:', error.response.data);
+  }
 }
