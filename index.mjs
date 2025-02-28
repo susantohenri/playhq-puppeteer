@@ -6,7 +6,7 @@ import { Dropbox } from 'dropbox';
 import * as fs from 'fs';
 
 export const handler = async (event) => {
-  const { url, nextSchedule } = await getUrlAndNextSchedule()
+  const { url, cronExpr } = await getUrlAndNextSchedule()
   const [names, data] = await Promise.all([
     readPlayerNames(),
     pullPlayerData(`https://www.playhq.com${url}`)
@@ -77,47 +77,38 @@ async function getUrlAndNextSchedule() {
     return document.querySelectorAll('[name="calendar-empty"]')[1]
       .parentElement.nextElementSibling.querySelector('span')
   }, { timeout: 30000 });
-  const nextSchedule = await page.evaluate(() => {
-    // Select the target element
-    const targetElement = document.querySelectorAll(`[name="calendar-empty"]`)[1];
-    if (!targetElement) return;
-
-    // Get parent and next sibling
-    const sibling = targetElement.parentElement?.nextElementSibling;
-    if (!sibling) return;
-
-    // Find the span inside the sibling
+  const cronExpr = await page.evaluate(() => {
+    const element = document.querySelectorAll('[name="calendar-empty"]')[1];
+    const parent = element.parentElement;
+    const sibling = parent.nextElementSibling;
     const span = sibling.querySelector("span");
-    if (!span) return;
+    const match = span.textContent.match(/(\d{2}):(\d{2})\s(AM|PM),\s\w+,\s(\d{2})\s(\w+)\s(\d{2})/);
 
-    // Extract text content (e.g., "06:40 PM, Fri, 28 Feb 25")
-    const text = span.textContent.trim();
-    const match = text.match(/(\d{2}):(\d{2})\s?(AM|PM),\s?(\w{3}),\s?(\d{2})\s?(\w{3})\s?(\d{2})/);
-    if (!match) return;
+    let [_, hour, minutes, period, day, monthText, year] = match;
 
-    // Parse extracted values
-    let [_, hour, minute, period, dayOfWeek, day, monthStr, year] = match;
-    const monthMap = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
-    const month = monthMap[monthStr];
-    year = `20${year}`; // Convert two-digit year to four-digit
-
-    // Convert to 24-hour format
     hour = parseInt(hour, 10);
+    minutes = parseInt(minutes, 10);
+    year = parseInt("20" + year, 10); // Convert YY to YYYY
+
     if (period === "PM" && hour !== 12) hour += 12;
     if (period === "AM" && hour === 12) hour = 0;
 
-    // Create Date object in GMT+11
-    const date = new Date(Date.UTC(year, month, day, hour, minute));
-    date.setUTCHours(date.getUTCHours() - 11); // Convert to GMT+0
+    const monthMap = {
+      "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+      "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12
+    };
+    const month = monthMap[monthText];
 
-    // Format to "yyyy-mm-dd hh:ii:ss"
-    const formattedDate = date.toISOString().replace("T", " ").split(".")[0];
+    let date = new Date(Date.UTC(year, month - 1, day, hour, minutes));
+    date.setHours(date.getHours() - 11);
 
-    return formattedDate;
+    const cronExpr = `cron(${date.getUTCMinutes()} ${date.getUTCHours()} ${date.getUTCDate()} ${date.getUTCMonth() + 1} ? ${date.getUTCFullYear()})`;
+
+    return cronExpr;
   })
 
   browser.close()
-  return { url, nextSchedule };
+  return { url, cronExpr };
 }
 
 async function readPlayerNames() {
