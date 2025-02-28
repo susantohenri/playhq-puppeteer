@@ -4,127 +4,148 @@ import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 import { Dropbox } from 'dropbox';
 import * as fs from 'fs';
+import { EventBridgeClient, PutRuleCommand, PutTargetsCommand, DeleteRuleCommand, RemoveTargetsCommand } from "@aws-sdk/client-eventbridge";
+import { LambdaClient, AddPermissionCommand } from "@aws-sdk/client-lambda";
+
+const eventbridge = new EventBridgeClient({});
+const lambda = new LambdaClient({});
 
 export const handler = async (event) => {
-  const { url, cronExpr } = await getUrlAndNextSchedule()
-  const [names, data] = await Promise.all([
-    readPlayerNames(),
-    pullPlayerData(`https://www.playhq.com${url}`)
-  ]);
-  let players = names.map(name => {
-    return { ...data.find(obj => obj.name === name), name };
-  });
-  await writeXlsx(players);
-  await uploadFile();
-  const response = {
-    statusCode: 200,
-    body: true,
-  };
-  return response;
+  try {
+    const { url, cronExpr } = await getUrlAndNextSchedule()
+    const [names, data] = await Promise.all([
+      readPlayerNames(),
+      pullPlayerData(`https://www.playhq.com${url}`)
+    ]);
+    let players = names.map(name => {
+      return { ...data.find(obj => obj.name === name), name };
+    });
+    await writeXlsx(players);
+    await uploadFile();
+    await scheduleNextRun(cronExpr);
+    const response = {
+      statusCode: 200,
+      body: true,
+    };
+    return response;
+  } catch (error) {
+    console.error('handler', error);
+    throw error;
+  }
 };
 
 async function getUrlAndNextSchedule() {
-  const browser = await puppeteer.launch({
-    defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
-    ignoreHTTPSErrors: true,
-    args: [...chromium.args,
-      '--single-process',
-      '--no-sandbox',
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      '--disable-web-security',
-      '--disable-features=AudioServiceOutOfProcess',
-      '--disable-animations',
-      '--disable-smooth-scrolling',
-      '--disable-background-timer-throttling',
-      '--disable-setuid-sandbox'
-    ],
-  });
-  const page = await browser.newPage();
-  await page.setUserAgent(`Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36`);
-  await page.evaluateOnNewDocument(() => {
-    Object.defineProperty(navigator, `webdriver`, { get: () => undefined });
-  });
-  await page.setRequestInterception(true);
-  page.on('request', (request) => {
-    const resourceType = request.resourceType();
-    const url = request.url();
-    if (['image', 'stylesheet', 'font', 'svg'].includes(resourceType)) {
-      request.abort();
-    } else if (!url.includes('playhq.com')) {
-      request.abort();
-    } else {
-      request.continue();
-    }
-  });
-  await page.goto(`https://www.playhq.com/basketball-victoria/org/sandringham-sabres-basketball-club/f321d4fc/victorian-junior-basketball-league-2025/teams/sandringham-u14-boys-7/e9fc439b`, {
-    waitUntil: `domcontentloaded`,
-    timeout: 30000
-  });
+  try {
+    const browser = await puppeteer.launch({
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
+      args: [...chromium.args,
+        '--single-process',
+        '--no-sandbox',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--disable-web-security',
+        '--disable-features=AudioServiceOutOfProcess',
+        '--disable-animations',
+        '--disable-smooth-scrolling',
+        '--disable-background-timer-throttling',
+        '--disable-setuid-sandbox'
+      ],
+    });
+    const page = await browser.newPage();
+    await page.setUserAgent(`Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36`);
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, `webdriver`, { get: () => undefined });
+    });
+    await page.setRequestInterception(true);
+    page.on('request', (request) => {
+      const resourceType = request.resourceType();
+      const url = request.url();
+      if (['image', 'stylesheet', 'font', 'svg'].includes(resourceType)) {
+        request.abort();
+      } else if (!url.includes('playhq.com')) {
+        request.abort();
+      } else {
+        request.continue();
+      }
+    });
+    await page.goto(`https://www.playhq.com/basketball-victoria/org/sandringham-sabres-basketball-club/f321d4fc/victorian-junior-basketball-league-2025/teams/sandringham-u14-boys-7/e9fc439b`, {
+      waitUntil: `domcontentloaded`,
+      timeout: 30000
+    });
 
-  // get url
-  await page.waitForFunction(() => {
-    return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0]
-  }, { timeout: 30000 });
-  const url = await page.evaluate(() => {
-    return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0].getAttribute(`href`)
-  })
+    // get url
+    await page.waitForFunction(() => {
+      return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0]
+    }, { timeout: 30000 });
+    const url = await page.evaluate(() => {
+      return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0].getAttribute(`href`)
+    })
 
-  // get next schedule
-  await page.waitForFunction(() => {
-    return document.querySelectorAll('[name="calendar-empty"]')[1]
-      .parentElement.nextElementSibling.querySelector('span')
-  }, { timeout: 30000 });
-  const cronExpr = await page.evaluate(() => {
-    const element = document.querySelectorAll('[name="calendar-empty"]')[1];
-    const parent = element.parentElement;
-    const sibling = parent.nextElementSibling;
-    const span = sibling.querySelector("span");
-    const match = span.textContent.match(/(\d{2}):(\d{2})\s(AM|PM),\s\w+,\s(\d{2})\s(\w+)\s(\d{2})/);
+    // get next schedule
+    await page.waitForFunction(() => {
+      return document.querySelectorAll('[name="calendar-empty"]')[1]
+        .parentElement.nextElementSibling.querySelector('span')
+    }, { timeout: 30000 });
+    const cronExpr = await page.evaluate(() => {
+      const element = document.querySelectorAll('[name="calendar-empty"]')[1];
+      const parent = element.parentElement;
+      const sibling = parent.nextElementSibling;
+      const span = sibling.querySelector("span");
+      const match = span.textContent.match(/(\d{2}):(\d{2})\s(AM|PM),\s\w+,\s(\d{2})\s(\w+)\s(\d{2})/);
 
-    let [_, hour, minutes, period, day, monthText, year] = match;
+      let [_, hour, minutes, period, day, monthText, year] = match;
 
-    hour = parseInt(hour, 10);
-    minutes = parseInt(minutes, 10);
-    year = parseInt("20" + year, 10); // Convert YY to YYYY
+      hour = parseInt(hour, 10);
+      minutes = parseInt(minutes, 10);
+      year = parseInt("20" + year, 10); // Convert YY to YYYY
 
-    if (period === "PM" && hour !== 12) hour += 12;
-    if (period === "AM" && hour === 12) hour = 0;
+      if (period === "PM" && hour !== 12) hour += 12;
+      if (period === "AM" && hour === 12) hour = 0;
 
-    const monthMap = {
-      "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
-      "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12
-    };
-    const month = monthMap[monthText];
+      const monthMap = {
+        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12
+      };
+      const month = monthMap[monthText];
 
-    let date = new Date(Date.UTC(year, month - 1, day, hour, minutes));
-    date.setHours(date.getHours() - 11);
+      let date = new Date(Date.UTC(year, month - 1, day, hour, minutes));
+      date.setHours(date.getHours() - 11);
 
-    const cronExpr = `cron(${date.getUTCMinutes()} ${date.getUTCHours()} ${date.getUTCDate()} ${date.getUTCMonth() + 1} ? ${date.getUTCFullYear()})`;
+      const cronExpr = `cron(${date.getUTCMinutes()} ${date.getUTCHours()} ${date.getUTCDate()} ${date.getUTCMonth() + 1} ? ${date.getUTCFullYear()})`;
 
-    return cronExpr;
-  })
+      return cronExpr;
+    })
 
-  browser.close()
-  return { url, cronExpr };
+    browser.close()
+    return { url, cronExpr };
+  } catch (error) {
+    console.error('getUrlAndNextSchedule', error);
+    throw error;
+  }
 }
 
 async function readPlayerNames() {
-  const currentDir = path.dirname(new URL(import.meta.url).pathname);
-  const filePath = path.join(currentDir, 'template.xlsx');
-  const workbook = await xlsxPopulate.fromFileAsync(filePath);
-  const sheet = workbook.sheet(`Template`);
-  let row = 2;
-  const names = [];
-  while (true) {
-    const name = sheet.cell(`B${row}`).value();
-    row++;
-    if (undefined === name) break;
-    else names.push(name.replace(String.fromCharCode(160), String.fromCharCode(32)))
+  try {
+    const currentDir = path.dirname(new URL(import.meta.url).pathname);
+    const filePath = path.join(currentDir, 'template.xlsx');
+    const workbook = await xlsxPopulate.fromFileAsync(filePath);
+    const sheet = workbook.sheet(`Template`);
+    let row = 2;
+    const names = [];
+    while (true) {
+      const name = sheet.cell(`B${row}`).value();
+      row++;
+      if (undefined === name) break;
+      else names.push(name.replace(String.fromCharCode(160), String.fromCharCode(32)))
+    }
+    return names;
+  } catch (error) {
+    console.error('readPlayerNames', error);
+    throw error;
   }
-  return names;
 }
 
 async function pullPlayerData(url) {
@@ -215,7 +236,8 @@ async function writeXlsx(players) {
 
     await workbook.toFileAsync(`/tmp/result.xlsx`);
   } catch (error) {
-    console.error('Error updating Excel file:', error);
+    console.error('writeXlsx', error);
+    throw error;
   }
 }
 
@@ -243,7 +265,7 @@ async function uploadFile() {
     const dbx = new Dropbox({ accessToken: await dropboxAccessToken() });
     return await dbx.filesUpload(uploadParams);
   } catch (error) {
-    console.error('Error uploading file:', error.message);
+    console.error('uploadFile', error.message);
     throw error;
   }
 }
@@ -279,6 +301,42 @@ async function dropboxAccessToken() {
     const data = await response.json();
     return data.access_token;
   } catch (error) {
-    console.error('Error refreshing token:', error.response.data);
+    console.error('dropboxAccessToken', error.response.data);
+    throw error;
+  }
+}
+
+async function scheduleNextRun(cronExpr) {
+  const functionName = "PlayHQPuppeteer";
+  const ruleName = `ScheduleRule-${Date.now()}`;
+
+  try {
+    // 1️⃣ Create EventBridge rule
+    await eventbridge.send(new PutRuleCommand({
+      Name: ruleName,
+      ScheduleExpression: cronExpr,
+      State: "ENABLED",
+    }));
+
+    // 2️⃣ Allow EventBridge to invoke the Lambda function
+    await lambda.send(new AddPermissionCommand({
+      FunctionName: functionName,
+      StatementId: `EventBridgeInvoke-${ruleName}`,
+      Action: "lambda:InvokeFunction",
+      Principal: "events.amazonaws.com",
+      SourceArn: `arn:aws:events:ap-southeast-2:412381761755:rule/${ruleName}`,
+    }));
+
+    // 3️⃣ Attach the rule to the Lambda function
+    await eventbridge.send(new PutTargetsCommand({
+      Rule: ruleName,
+      Targets: [{
+        Arn: `arn:aws:lambda:ap-southeast-2:412381761755:function:${functionName}`,
+        Id: "1",
+      }],
+    }));
+  } catch (error) {
+    console.error(`scheduleNextRun`, error);
+    throw error;
   }
 }
