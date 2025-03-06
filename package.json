@@ -20,8 +20,10 @@
   "homepage": "https://github.com/susantohenri/playhq-puppeteer#readme",
   "description": "",
   "dependencies": {
-    "dropbox": "^10.34.0",
+    "@azure/msal-node": "^3.2.3",
     "@sparticuz/chromium": "^132.0.0",
+    "dotenv": "^16.4.7",
+    "dropbox": "^10.34.0",
     "puppeteer-core": "^24.0.0",
     "xlsx-populate": "^1.21.0"
   },

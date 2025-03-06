@@ -21,7 +21,7 @@ export const handler = async (event) => {
       return { ...data.find(obj => obj.name === name), name };
     });
     await writeXlsx(players);
-    await uploadFile();
+    await uploadToSharePoint(); // await uploadFile();
     await scheduleNextRun(cronExpr);
     const response = {
       statusCode: 200,
@@ -337,6 +337,51 @@ async function scheduleNextRun(cronExpr) {
     }));
   } catch (error) {
     console.error(`scheduleNextRun`, error);
+    throw error;
+  }
+}
+
+async function getSharePointAccessToken() {
+  try {
+    const cca = new ConfidentialClientApplication({
+      auth: {
+        clientId: process.env.CLIENT_ID,
+        clientSecret: process.env.CLIENT_SECRET,
+        authority: `https://login.microsoftonline.com/${process.env.TENANT_ID}/v2.0`,
+      },
+    });
+    const response = await cca.acquireTokenByClientCredential({
+      scopes: ['https://graph.microsoft.com/.default'],
+    });
+    return response.accessToken;
+  } catch (error) {
+    console.error('Error acquiring token', error);
+    throw error;
+  }
+}
+
+async function uploadToSharePoint() {
+  try {
+    const accessToken = await getSharePointAccessToken();
+    const filePath = `./result.xlsx`;
+    const fileName = '/Current/Sabres/Sabres 14.7 Boys Game Stats (2025).xlsx';
+
+    const fileBuffer = fs.readFileSync(filePath);
+    const fileSize = fs.statSync(filePath).size;
+
+    const uploadUrl = `https://graph.microsoft.com/v1.0/sites/${process.env.SITE_ID}/drives/${process.env.DRIVE_ID}/root:/${fileName}:/content`;
+
+    return await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Length': fileSize.toString()
+      },
+      body: fileBuffer
+    });
+  } catch (error) {
+    console.error('Error Upload to SharePoint', error);
     throw error;
   }
 }
