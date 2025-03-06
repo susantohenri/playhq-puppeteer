@@ -17,12 +17,16 @@ export const handler = async (event) => {
       readPlayerNames(),
       pullPlayerData(`https://www.playhq.com${url}`)
     ]);
-    let players = names.map(name => {
-      return { ...data.find(obj => obj.name === name), name };
-    });
-    await writeXlsx(players);
-    await uploadToSharePoint(); // await uploadFile();
-    await scheduleNextRun(cronExpr);
+
+    if (!!data) {
+      let players = names.map(name => {
+        return { ...data.find(obj => obj.name === name), name };
+      });
+      await writeXlsx(players);
+      await uploadToSharePoint(); // await uploadFile();
+      if (!!cronExpr) await scheduleNextRun(cronExpr);
+    }
+
     const response = {
       statusCode: 200,
       body: true,
@@ -85,39 +89,45 @@ async function getUrlAndNextSchedule() {
     })
 
     // get next schedule
-    await page.waitForFunction(() => {
-      return document.querySelectorAll('[name="calendar-empty"]')[1]
-        .parentElement.nextElementSibling.querySelector('span')
-    }, { timeout: 30000 });
-    const cronExpr = await page.evaluate(() => {
-      const element = document.querySelectorAll('[name="calendar-empty"]')[1];
-      const parent = element.parentElement;
-      const sibling = parent.nextElementSibling;
-      const span = sibling.querySelector("span");
-      const match = span.textContent.match(/(\d{2}):(\d{2})\s(AM|PM),\s\w+,\s(\d{2})\s(\w+)\s(\d{2})/);
+    let cronExpr = false;
+    try {
+      await page.waitForFunction(() => {
+        return document.querySelectorAll('[name="calendar-empty"]')[1]
+          .parentElement.nextElementSibling.querySelector('span')
+      }, { timeout: 30000 });
 
-      let [_, hour, minutes, period, day, monthText, year] = match;
+      const cronExpr = await page.evaluate(() => {
+        const element = document.querySelectorAll('[name="calendar-empty"]')[1];
+        const parent = element.parentElement;
+        const sibling = parent.nextElementSibling;
+        const span = sibling.querySelector("span");
+        const match = span.textContent.match(/(\d{2}):(\d{2})\s(AM|PM),\s\w+,\s(\d{2})\s(\w+)\s(\d{2})/);
 
-      hour = parseInt(hour, 10);
-      minutes = parseInt(minutes, 10);
-      year = parseInt("20" + year, 10); // Convert YY to YYYY
+        let [_, hour, minutes, period, day, monthText, year] = match;
 
-      if (period === "PM" && hour !== 12) hour += 12;
-      if (period === "AM" && hour === 12) hour = 0;
+        hour = parseInt(hour, 10);
+        minutes = parseInt(minutes, 10);
+        year = parseInt("20" + year, 10); // Convert YY to YYYY
 
-      const monthMap = {
-        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
-        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12
-      };
-      const month = monthMap[monthText];
+        if (period === "PM" && hour !== 12) hour += 12;
+        if (period === "AM" && hour === 12) hour = 0;
 
-      let date = new Date(Date.UTC(year, month - 1, day, hour, minutes));
-      date.setHours(date.getHours() - 11);
+        const monthMap = {
+          "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+          "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12
+        };
+        const month = monthMap[monthText];
 
-      const cronExpr = `cron(${date.getUTCMinutes()} ${date.getUTCHours()} ${date.getUTCDate()} ${date.getUTCMonth() + 1} ? ${date.getUTCFullYear()})`;
+        let date = new Date(Date.UTC(year, month - 1, day, hour, minutes));
+        date.setHours(date.getHours() - 11);
 
-      return cronExpr;
-    })
+        cronExpr = `cron(${date.getUTCMinutes()} ${date.getUTCHours()} ${date.getUTCDate()} ${date.getUTCMonth() + 1} ? ${date.getUTCFullYear()})`;
+
+        return cronExpr;
+      })
+    } catch (error) {
+      console.log(`next schedule not found`)
+    }
 
     browser.close()
     return { url, cronExpr };
@@ -149,73 +159,78 @@ async function readPlayerNames() {
 }
 
 async function pullPlayerData(url) {
-  const browser = await puppeteer.launch({
-    defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
-    ignoreHTTPSErrors: true,
-    args: [...chromium.args,
-      '--single-process',
-      '--no-sandbox',
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      '--disable-web-security',
-      '--disable-features=AudioServiceOutOfProcess',
-      '--disable-animations',
-      '--disable-smooth-scrolling',
-      '--disable-background-timer-throttling',
-      '--disable-setuid-sandbox'
-    ],
-  });
-  const page = await browser.newPage();
-  await page.setUserAgent(`Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36`);
-  await page.evaluateOnNewDocument(() => {
-    Object.defineProperty(navigator, `webdriver`, { get: () => undefined });
-  });
-  await page.setRequestInterception(true);
-  page.on('request', (request) => {
-    const resourceType = request.resourceType();
-    const url = request.url();
-    if (['image', 'stylesheet', 'font', 'svg'].includes(resourceType)) {
-      request.abort();
-    } else if (!url.includes('playhq.com')) {
-      request.abort();
-    } else {
-      request.continue();
-    }
-  });
-  await page.goto(url, {
-    waitUntil: `domcontentloaded`,
-    timeout: 10000
-  });
-
-  await page.waitForFunction(() => {
-    const button = Array.from(document.querySelectorAll('button')).find(btn =>
-      btn.querySelector('span:last-child')?.textContent.trim() === "Show advanced stats"
-    )
-    return button && typeof button.onclick === 'function';
-  }, { timeout: 30000 });
-
-  const data = await page.evaluate(() => {
-    const data = [];
-    Array.from(document.querySelectorAll('button')).find(btn =>
-      btn.querySelector('span:last-child')?.textContent.trim() === "Show advanced stats"
-    ).click()
-    document.querySelectorAll(`tr[data-testid]`).forEach(row => {
-      const cells = row.cells
-      data.push({
-        "#": cells[0].querySelector(`div`).textContent.trim(),
-        "name": cells[1].querySelector(`div a span`).textContent.trim(),
-        "1PT": cells[3].textContent.trim(),
-        "2PT": cells[4].textContent.trim(),
-        "3PT": cells[5].textContent.trim(),
-        "F": cells[6].textContent.trim(),
-      })
+  try {
+    const browser = await puppeteer.launch({
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
+      args: [...chromium.args,
+        '--single-process',
+        '--no-sandbox',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--disable-web-security',
+        '--disable-features=AudioServiceOutOfProcess',
+        '--disable-animations',
+        '--disable-smooth-scrolling',
+        '--disable-background-timer-throttling',
+        '--disable-setuid-sandbox'
+      ],
     });
+    const page = await browser.newPage();
+    await page.setUserAgent(`Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36`);
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, `webdriver`, { get: () => undefined });
+    });
+    await page.setRequestInterception(true);
+    page.on('request', (request) => {
+      const resourceType = request.resourceType();
+      const url = request.url();
+      if (['image', 'stylesheet', 'font', 'svg'].includes(resourceType)) {
+        request.abort();
+      } else if (!url.includes('playhq.com')) {
+        request.abort();
+      } else {
+        request.continue();
+      }
+    });
+    await page.goto(url, {
+      waitUntil: `domcontentloaded`,
+      timeout: 10000
+    });
+
+    await page.waitForFunction(() => {
+      const button = Array.from(document.querySelectorAll('button')).find(btn =>
+        btn.querySelector('span:last-child')?.textContent.trim() === "Show advanced stats"
+      )
+      return button && typeof button.onclick === 'function';
+    }, { timeout: 30000 });
+
+    const data = await page.evaluate(() => {
+      const data = [];
+      Array.from(document.querySelectorAll('button')).find(btn =>
+        btn.querySelector('span:last-child')?.textContent.trim() === "Show advanced stats"
+      ).click()
+      document.querySelectorAll(`tr[data-testid]`).forEach(row => {
+        const cells = row.cells
+        data.push({
+          "#": cells[0].querySelector(`div`).textContent.trim(),
+          "name": cells[1].querySelector(`div a span`).textContent.trim(),
+          "1PT": cells[3].textContent.trim(),
+          "2PT": cells[4].textContent.trim(),
+          "3PT": cells[5].textContent.trim(),
+          "F": cells[6].textContent.trim(),
+        })
+      });
+      return data;
+    })
+    await browser.close();
     return data;
-  })
-  await browser.close();
-  return data;
+  } catch (error) {
+    console.log(`pullPlayerData`, error)
+    return false;
+  }
 }
 
 async function writeXlsx(players) {
