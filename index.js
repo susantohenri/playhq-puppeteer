@@ -6,63 +6,117 @@ import { ConfidentialClientApplication } from '@azure/msal-node';
 import 'dotenv/config';
 
 (async () => {
-    const url = await getUrl()
-    const [names, data] = await Promise.all([
-        readPlayerNames(),
-        pullPlayerData(`https://www.playhq.com${url}`)
-    ]);
-    let players = names.map(name => {
-        return { ...data.find(obj => obj.name === name), name };
-    });
-    await writeXlsx(players);
-    await uploadToSharePoint();
+    try {
+        const { url, cronExpr } = await getUrlAndNextSchedule()
+        const [names, data] = await Promise.all([
+            readPlayerNames(),
+            pullPlayerData(`https://www.playhq.com${url}`)
+        ]);
+        let players = names.map(name => {
+            return { ...data.find(obj => obj.name === name), name };
+        });
+        await writeXlsx(players);
+        await uploadToSharePoint(); // await uploadFile();
+        await scheduleNextRun(cronExpr);
+        const response = {
+            statusCode: 200,
+            body: true,
+        };
+        return response;
+    } catch (error) {
+        console.error('handler', error);
+        throw error;
+    }
 })();
 
-async function getUrl() {
-    const browser = await puppeteer.launch({
-        headless: true,
-        devtools: false,
-        args: [
-            `--disable-gpu`,
-            `--disable-dev-shm-usage`,
-            `--disable-web-security`,
-            `--disable-features=AudioServiceOutOfProcess`,
-            `--disable-animations`,
-            `--disable-smooth-scrolling`,
-            `--disable-background-timer-throttling`,
-            '--no-sandbox',
-            '--disable-setuid-sandbox'
-        ],
-    });
-    const page = await browser.newPage();
-    await page.setUserAgent(`Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36`);
-    await page.evaluateOnNewDocument(() => {
-        Object.defineProperty(navigator, `webdriver`, { get: () => undefined });
-    });
-    await page.setRequestInterception(true);
-    page.on('request', (request) => {
-        const resourceType = request.resourceType();
-        const url = request.url();
-        if (['image', 'stylesheet', 'font', 'svg'].includes(resourceType)) {
-            request.abort();
-        } else if (!url.includes('playhq.com')) {
-            request.abort();
-        } else {
-            request.continue();
-        }
-    });
-    await page.goto(`https://www.playhq.com/basketball-victoria/org/sandringham-sabres-basketball-club/f321d4fc/victorian-junior-basketball-league-2025/teams/sandringham-u14-boys-7/e9fc439b`, {
-        waitUntil: `domcontentloaded`,
-        timeout: 30000
-    });
-    await page.waitForFunction(() => {
-        return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0]
-    }, { timeout: 30000 });
-    const url = await page.evaluate(() => {
-        return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0].getAttribute(`href`)
-    })
-    browser.close()
-    return url;
+async function getUrlAndNextSchedule() {
+    try {
+        const browser = await puppeteer.launch({
+            headless: true,
+            devtools: false,
+            args: [
+                `--disable-gpu`,
+                `--disable-dev-shm-usage`,
+                `--disable-web-security`,
+                `--disable-features=AudioServiceOutOfProcess`,
+                `--disable-animations`,
+                `--disable-smooth-scrolling`,
+                `--disable-background-timer-throttling`,
+                '--no-sandbox',
+                '--disable-setuid-sandbox'
+            ],
+        });
+        const page = await browser.newPage();
+        await page.setUserAgent(`Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36`);
+        await page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, `webdriver`, { get: () => undefined });
+        });
+        await page.setRequestInterception(true);
+        page.on('request', (request) => {
+            const resourceType = request.resourceType();
+            const url = request.url();
+            if (['image', 'stylesheet', 'font', 'svg'].includes(resourceType)) {
+                request.abort();
+            } else if (!url.includes('playhq.com')) {
+                request.abort();
+            } else {
+                request.continue();
+            }
+        });
+        await page.goto(`https://www.playhq.com/basketball-victoria/org/sandringham-sabres-basketball-club/f321d4fc/victorian-junior-basketball-league-2025/teams/sandringham-u14-boys-7/e9fc439b`, {
+            waitUntil: `domcontentloaded`,
+            timeout: 30000
+        });
+
+        // get url
+        await page.waitForFunction(() => {
+            return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0]
+        }, { timeout: 30000 });
+        const url = await page.evaluate(() => {
+            return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0].getAttribute(`href`)
+        })
+
+        // get next schedule
+        await page.waitForFunction(() => {
+            return document.querySelectorAll('[name="calendar-empty"]')[1]
+                .parentElement.nextElementSibling.querySelector('span')
+        }, { timeout: 30000 });
+        const cronExpr = await page.evaluate(() => {
+            const element = document.querySelectorAll('[name="calendar-empty"]')[1];
+            const parent = element.parentElement;
+            const sibling = parent.nextElementSibling;
+            const span = sibling.querySelector("span");
+            const match = span.textContent.match(/(\d{2}):(\d{2})\s(AM|PM),\s\w+,\s(\d{2})\s(\w+)\s(\d{2})/);
+
+            let [_, hour, minutes, period, day, monthText, year] = match;
+
+            hour = parseInt(hour, 10);
+            minutes = parseInt(minutes, 10);
+            year = parseInt("20" + year, 10); // Convert YY to YYYY
+
+            if (period === "PM" && hour !== 12) hour += 12;
+            if (period === "AM" && hour === 12) hour = 0;
+
+            const monthMap = {
+                "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+                "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12
+            };
+            const month = monthMap[monthText];
+
+            let date = new Date(Date.UTC(year, month - 1, day, hour, minutes));
+            date.setHours(date.getHours() - 11);
+
+            const cronExpr = `cron(${date.getUTCMinutes()} ${date.getUTCHours()} ${date.getUTCDate()} ${date.getUTCMonth() + 1} ? ${date.getUTCFullYear()})`;
+
+            return cronExpr;
+        })
+
+        browser.close()
+        return { url, cronExpr };
+    } catch (error) {
+        console.error('getUrlAndNextSchedule', error);
+        throw error;
+    }
 }
 
 async function readPlayerNames() {
