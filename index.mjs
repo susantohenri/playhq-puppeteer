@@ -6,6 +6,8 @@ import { Dropbox } from 'dropbox';
 import * as fs from 'fs';
 import { EventBridgeClient, PutRuleCommand, PutTargetsCommand, DeleteRuleCommand, RemoveTargetsCommand } from "@aws-sdk/client-eventbridge";
 import { LambdaClient, AddPermissionCommand } from "@aws-sdk/client-lambda";
+import { ConfidentialClientApplication } from '@azure/msal-node';
+import 'dotenv/config';
 
 const eventbridge = new EventBridgeClient({});
 const lambda = new LambdaClient({});
@@ -442,7 +444,7 @@ async function getSharePointAccessToken() {
 async function uploadToSharePoint() {
   try {
     const accessToken = await getSharePointAccessToken();
-    const filePath = `./result.xlsx`;
+    const filePath = `/tmp/result.xlsx`;
     const fileName = '/Current/Sabres/Sabres 14.7 Boys Game Stats (2025).xlsx';
 
     const fileBuffer = fs.readFileSync(filePath);
