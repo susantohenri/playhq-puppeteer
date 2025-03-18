@@ -80,7 +80,20 @@ async function getUrl() {
             return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0]
         }, { timeout: 30000 });
         const url = await page.evaluate(() => {
-            return document.querySelectorAll(`a[data-testid^="fixture-button"]`)[0].getAttribute(`href`)
+            const getLastGameWithoutUpcoming = () => {
+                const gameElements = document.querySelectorAll('[data-testid="games-on-date"]');
+                const gamesArray = Array.from(gameElements);
+                const gamesWithoutUpcoming = gamesArray.filter(game => {
+                    const spans = game.getElementsByTagName('span');
+                    return !Array.from(spans).some(span =>
+                        span.textContent.toLowerCase().includes('upcoming')
+                    );
+                });
+                return gamesWithoutUpcoming.length > 0 ? gamesWithoutUpcoming.pop() : null;
+            };
+            const lastGame = getLastGameWithoutUpcoming()
+            const link = lastGame.querySelector(`a[data-testid^="fixture-button"]`)
+            return link.getAttribute(`href`)
         })
 
         browser.close()
