@@ -164,19 +164,19 @@ async function getSchedule() {
                 return null;
             }
 
-            var upcomingGame = findGrandparentOfUpcomingSpan()
+            var upcomingGame = findGrandparentOfUpcomingSpan();
 
             const element = upcomingGame.querySelector('[name="calendar-empty"]');
             const parent = element.parentElement;
             const sibling = parent.nextElementSibling;
             const span = sibling.querySelector("span");
-            const match = span.textContent.match(/(\d{2}):(\d{2})\s(AM|PM),\s\w+,\s(\d{2})\s(\w+)\s(\d{2})/);
 
+            const match = span.textContent.match(/(\d{2}):(\d{2})\s(AM|PM),\s\w+,\s(\d{2})\s(\w+)\s(\d{2})/);
             let [_, hour, minutes, period, day, monthText, year] = match;
 
             hour = parseInt(hour, 10);
             minutes = parseInt(minutes, 10);
-            year = parseInt("20" + year, 10); // Convert YY to YYYY
+            year = parseInt("20" + year, 10);
 
             if (period === "PM" && hour !== 12) hour += 12;
             if (period === "AM" && hour === 12) hour = 0;
@@ -187,10 +187,12 @@ async function getSchedule() {
             };
             const month = monthMap[monthText];
 
-            let date = new Date(Date.UTC(year, month - 1, day, hour, minutes));
-            date.setHours(date.getHours() - 11);
+            let victoriaTime = new Date(Date.UTC(year, month - 1, day, hour, minutes));
+            victoriaTime.setHours(victoriaTime.getHours() - 11);
 
-            cronExpr = `cron(${date.getUTCMinutes()} ${date.getUTCHours()} ${date.getUTCDate()} ${date.getUTCMonth() + 1} ? ${date.getUTCFullYear()})`;
+            victoriaTime.setMinutes(victoriaTime.getMinutes() + 20);
+
+            const cronExpr = `cron(${victoriaTime.getUTCMinutes()} ${victoriaTime.getUTCHours()} ${victoriaTime.getUTCDate()} ${victoriaTime.getUTCMonth() + 1} ? ${victoriaTime.getUTCFullYear()})`;
 
             return cronExpr;
         })
