@@ -273,12 +273,12 @@ async function pullPlayerData(url) {
             document.querySelectorAll(`tr[data-testid]`).forEach(row => {
                 const cells = row.cells
                 data.push({
-                    "#": cells[0].querySelector(`div`).textContent.trim(),
-                    "name": cells[1].querySelector(`div a span`).textContent.trim(),
-                    "1PT": cells[3].textContent.trim(),
-                    "2PT": cells[4].textContent.trim(),
-                    "3PT": cells[5].textContent.trim(),
-                    "F": cells[6].textContent.trim(),
+                    "#": cells[0].querySelector(`div`) ? cells[0].querySelector(`div`).textContent.trim() : ``,
+                    "name": cells[1].querySelector(`div a span`) ? cells[1].querySelector(`div a span`).textContent.trim() : ``,
+                    "1PT": cells[3] ? cells[3].textContent.trim() : ``,
+                    "2PT": cells[4] ? cells[4].textContent.trim() : ``,
+                    "3PT": cells[5] ? cells[5].textContent.trim() : ``,
+                    "F": cells[6] ? cells[6].textContent.trim() : ``,
                 })
             });
             return data;
